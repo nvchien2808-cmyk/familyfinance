@@ -28,6 +28,7 @@ export interface Transaction {
   member: string;
   date: string;
   note: string;
+  tags?: string[];
   receiptImage?: string;
 }
 
@@ -48,14 +49,15 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  // Added password field for mock authentication
   password?: string;
   currency: string;
   monthlyBudget: number;
   familyMembers: string[];
   biometricCredentialId?: string;
-  reminderEnabled: boolean; // Bật/tắt nhắc nhở
-  reminderTime: string;    // Giờ nhắc nhở (HH:mm)
+  reminderEnabled: boolean;
+  reminderTime: string;
+  profileImage?: string; // Ảnh đại diện người dùng
+  useImageAsBackground?: boolean; // Tùy chọn dùng ảnh làm hình nền
 }
 
 export interface AuthState {

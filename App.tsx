@@ -1,21 +1,40 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import Layout from './components/Layout';
 import Dashboard from './components/Dashboard';
 import TransactionList from './components/TransactionList';
 import Settings from './components/Settings';
+import Profile from './components/Profile';
 import SavingsGoals from './components/SavingsGoals';
 import TransactionModal from './components/TransactionModal';
 import GoalModal from './components/GoalModal';
 import ConfirmDialog from './components/ConfirmDialog';
 import { Transaction, User, AuthState, SavingsGoal } from './types';
-import { FAMILY_MEMBERS } from './constants.tsx';
+import { FAMILY_MEMBERS } from './constants';
+import { login, register, listenAuth, logout } from "./services/authService";
+import { pushToCloud, onSyncBroadcast, CloudData, pullFromCloud } from './services/syncService';
 
-const STORAGE_KEYS = {
-  USERS: 'ff_users_v2',
-  TRANSACTIONS: 'ff_transactions_v2',
-  GOALS: 'ff_goals_v2',
-  SESSION: 'ff_session_v2'
+// --- HELPER: Nén ảnh để đảm bảo lưu trữ Firestore mượt mà ---
+const compressImage = (base64Str: string): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const MAX_WIDTH = 1200; 
+      const scaleSize = MAX_WIDTH / img.width;
+      canvas.width = MAX_WIDTH;
+      canvas.height = img.height * scaleSize;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.7));
+    };
+  });
+};
+
+const error = console.error;
+console.error = (...args) => {
+  if (/defaultProps/.test(args[0])) return;
+  error(...args);
 };
 
 const App: React.FC = () => {
@@ -23,6 +42,9 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [savingsGoals, setSavingsGoals] = useState<SavingsGoal[]>([]);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
+  const [lastUpdated, setLastUpdated] = useState<number>(0);
   
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
@@ -30,234 +52,228 @@ const App: React.FC = () => {
   const [editingGoal, setEditingGoal] = useState<SavingsGoal | undefined>();
   
   const [confirmState, setConfirmState] = useState<{
-    isOpen: boolean;
-    id: string;
-    type: 'transaction' | 'goal';
-  }>({ isOpen: false, id: '', type: 'transaction' });
+    isOpen: boolean; id: string; type: 'transaction' | 'goal' | 'member'; title: string; message: string;
+  }>({ isOpen: false, id: '', type: 'transaction', title: '', message: '' });
 
   const [isLoginView, setIsLoginView] = useState(true);
+  const [regSuccess, setRegSuccess] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
 
+  // 1. Tính toán style động cho Background
+  const bgStyle = useMemo(() => {
+    if (auth.isAuthenticated && auth.user?.useImageAsBackground && auth.user?.profileImage) {
+      return { 
+        '--custom-bg': `url('${auth.user.profileImage}')`,
+        '--bg-overlay': 'rgba(255, 255, 255, 0.82)' 
+      } as React.CSSProperties;
+    }
+    return {} as React.CSSProperties;
+  }, [auth.user?.profileImage, auth.user?.useImageAsBackground, auth.isAuthenticated]);
+
+  const allExistingTags = useMemo(() => {
+    const tagSet = new Set<string>();
+    transactions.forEach(tx => tx.tags?.forEach(tag => tagSet.add(tag)));
+    return Array.from(tagSet).sort();
+  }, [transactions]);
+
+  const dataRef = useRef({ transactions, savingsGoals, auth, lastUpdated });
   useEffect(() => {
-    const savedSession = localStorage.getItem(STORAGE_KEYS.SESSION);
-    if (savedSession) {
-      const user = JSON.parse(savedSession);
-      setAuth({ user, isAuthenticated: true });
-      loadUserData(user.id);
+    dataRef.current = { transactions, savingsGoals, auth, lastUpdated };
+  }, [transactions, savingsGoals, auth, lastUpdated]);
+
+  const applySyncData = useCallback((data: CloudData) => {
+    if (data.lastUpdated > dataRef.current.lastUpdated) {
+      setTransactions(data.transactions || []);
+      setSavingsGoals(data.goals || []);
+      setAuth(prev => ({ ...prev, user: data.user }));
+      setLastUpdated(data.lastUpdated);
     }
   }, []);
 
-  // Logic nhắc nhở đơn giản khi app đang mở
+  const syncToCloudAction = useCallback(async (user: User, txs: Transaction[], goals: SavingsGoal[]) => {
+    setSyncStatus('syncing');
+    const timestamp = Date.now();
+    const success = await pushToCloud(user.id, {
+      transactions: txs,
+      goals: goals,
+      user: user,
+      lastUpdated: timestamp
+    });
+    setSyncStatus(success ? 'synced' : 'error');
+    if (success) setLastUpdated(timestamp);
+  }, []);
+
   useEffect(() => {
-    if (auth.isAuthenticated && auth.user?.reminderEnabled) {
-      const interval = setInterval(() => {
-        const now = new Date();
-        const currentTime = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        
-        if (currentTime === auth.user?.reminderTime) {
-          // Hiển thị thông báo nếu trình duyệt cho phép
-          if ("Notification" in window && Notification.permission === "granted") {
-            new Notification("FamilyFinance Nhắc Nhở", {
-              body: "Đã đến giờ nhập chi tiêu hôm nay rồi, đừng quên nhé! ❤️",
-              icon: "https://cdn-icons-png.flaticon.com/512/2845/2845914.png"
-            });
-          } else {
-            alert("🔔 Đã đến giờ nhập chi tiêu hôm nay rồi gia đình mình ơi!");
-          }
-        }
-      }, 60000); // Kiểm tra mỗi phút
-      return () => clearInterval(interval);
-    }
-  }, [auth.isAuthenticated, auth.user?.reminderEnabled, auth.user?.reminderTime]);
+    let syncUnsub: (() => void) | undefined;
+    const unsubAuth = listenAuth(async (firebaseUser) => {
+      if (firebaseUser) {
+        const uid = firebaseUser.uid;
+        syncUnsub = onSyncBroadcast(uid, applySyncData);
+        const cloudData = await pullFromCloud(uid);
 
-  const loadUserData = (userId: string) => {
-    const allTransactions = JSON.parse(localStorage.getItem(STORAGE_KEYS.TRANSACTIONS) || '[]');
-    setTransactions(allTransactions.filter((t: Transaction) => t.userId === userId));
-    const allGoals = JSON.parse(localStorage.getItem(STORAGE_KEYS.GOALS) || '[]');
-    setSavingsGoals(allGoals.filter((g: SavingsGoal) => g.userId === userId));
-  };
-
-  const handleAuth = (e: React.FormEvent) => {
-    e.preventDefault();
-    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    if (isLoginView) {
-      const foundUser = users.find((u: any) => u.email === email && u.password === password);
-      if (foundUser) {
-        setAuth({ user: foundUser, isAuthenticated: true });
-        localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(foundUser));
-        loadUserData(foundUser.id);
-      } else alert('Sai email hoặc mật khẩu');
-    } else {
-      // Corrected User object to include password field defined in types.ts
-      const newUser: User = { 
-        id: Date.now().toString(), 
-        email, 
-        password, 
-        name, 
-        currency: 'VND', 
-        monthlyBudget: 10000000, 
-        familyMembers: FAMILY_MEMBERS,
-        reminderEnabled: false,
-        reminderTime: '20:00'
-      };
-      users.push(newUser);
-      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
-      setIsLoginView(true);
-      alert('Đăng ký thành công!');
-    }
-  };
-
-  const handleBiometricLogin = async () => {
-    try {
-      if (!window.PublicKeyCredential) {
-        alert("Thiết bị này không hỗ trợ xác thực sinh trắc học.");
-        return;
+        setAuth({
+          user: cloudData?.user ?? {
+            id: uid,
+            email: firebaseUser.email!,
+            name: 'Gia đình',
+            currency: 'VND',
+            monthlyBudget: 10000000,
+            familyMembers: FAMILY_MEMBERS,
+            reminderEnabled: false,
+            reminderTime: '20:00',
+            useImageAsBackground: false,
+            profileImage: null
+          },
+          isAuthenticated: true
+        });
+      } else {
+        syncUnsub?.();
+        setAuth({ user: null, isAuthenticated: false });
       }
+      setIsLoaded(true);
+    });
+    return () => { unsubAuth(); syncUnsub?.(); };
+  }, [applySyncData]);
 
-      const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-      const userWithBio = users.find((u: User) => u.biometricCredentialId);
-
-      if (!userWithBio) {
-        alert("Bạn chưa thiết lập Face ID. Vui lòng đăng nhập bằng mật khẩu và bật nó trong Cài đặt.");
-        return;
-      }
-
-      const confirmBio = confirm(`Sử dụng Face ID để đăng nhập tài khoản: ${userWithBio.name}?`);
-      
-      if (confirmBio) {
-        setAuth({ user: userWithBio, isAuthenticated: true });
-        localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(userWithBio));
-        loadUserData(userWithBio.id);
-      }
-    } catch (err) {
-      console.error("Biometric Login Error:", err);
-      alert("Xác thực Face ID thất bại.");
-    }
-  };
-
-  const updateUser = (data: Partial<User>) => {
+  const updateUser = async (data: Partial<User>) => {
     if (!auth.user) return;
-    const updatedUser = { ...auth.user, ...data };
-    setAuth({ ...auth, user: updatedUser });
-    localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(updatedUser));
-    
-    const users = JSON.parse(localStorage.getItem(STORAGE_KEYS.USERS) || '[]');
-    const updatedUsers = users.map((u: User) => u.id === updatedUser.id ? updatedUser : u);
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+    let updatedData = { ...data };
+    if (data.profileImage && data.profileImage.startsWith('data:image')) {
+      updatedData.profileImage = await compressImage(data.profileImage);
+    }
+    const updatedUser = { ...auth.user, ...updatedData };
+    setAuth(prev => ({ ...prev, user: updatedUser }));
+    syncToCloudAction(updatedUser, transactions, savingsGoals);
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      if (isLoginView) { await login(email, password); } 
+      else {
+        await register(email, password);
+        setRegSuccess(true);
+        setTimeout(() => setRegSuccess(false), 3000);
+        setIsLoginView(true);
+      }
+    } catch (err: any) { alert(err.message); }
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    setAuth({ user: null, isAuthenticated: false });
+    setActiveTab('dashboard');
   };
 
   const saveTransaction = (data: any) => {
     if (!auth.user) return;
-    let updated;
-    if (editingTransaction) updated = transactions.map(t => t.id === editingTransaction.id ? { ...t, ...data } : t);
-    else updated = [...transactions, { ...data, id: Date.now().toString(), userId: auth.user.id }];
-    setTransactions(updated);
-    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
+    const newTxs = editingTransaction 
+      ? transactions.map(t => t.id === editingTransaction.id ? { ...t, ...data } : t)
+      : [...transactions, { ...data, id: Date.now().toString(), userId: auth.user.id }];
+    setTransactions(newTxs);
+    syncToCloudAction(auth.user, newTxs, savingsGoals);
+    setIsTxModalOpen(false);
   };
 
-  const deleteTransaction = (id: string) => {
-    const updated = transactions.filter(t => t.id !== id);
-    setTransactions(updated);
-    localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(updated));
-  };
-
-  const saveGoal = (data: Omit<SavingsGoal, 'id' | 'userId'>) => {
+  const saveGoal = (data: any) => {
     if (!auth.user) return;
-    let updated;
-    if (editingGoal) updated = savingsGoals.map(g => g.id === editingGoal.id ? { ...g, ...data } : g);
-    else updated = [...savingsGoals, { ...data, id: Date.now().toString(), userId: auth.user.id }];
-    setSavingsGoals(updated);
-    localStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(updated));
-  };
-
-  const deleteGoal = (id: string) => {
-    const updated = savingsGoals.filter(g => g.id !== id);
-    setSavingsGoals(updated);
-    localStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(updated));
-  };
-
-  const updateGoalAmount = (id: string, newAmount: number) => {
-    const updated = savingsGoals.map(g => g.id === id ? { ...g, currentAmount: newAmount } : g);
-    setSavingsGoals(updated);
-    localStorage.setItem(STORAGE_KEYS.GOALS, JSON.stringify(updated));
+    const newGoals = editingGoal
+      ? savingsGoals.map(g => g.id === editingGoal.id ? { ...g, ...data } : g)
+      : [...savingsGoals, { ...data, id: Date.now().toString(), userId: auth.user.id }];
+    setSavingsGoals(newGoals);
+    syncToCloudAction(auth.user, transactions, newGoals);
+    setIsGoalModalOpen(false);
   };
 
   const confirmDelete = () => {
-    if (confirmState.type === 'transaction') deleteTransaction(confirmState.id);
-    else deleteGoal(confirmState.id);
+    if (!auth.user) return;
+    if (confirmState.type === 'transaction') {
+      const newTxs = transactions.filter(t => t.id !== confirmState.id);
+      setTransactions(newTxs);
+      syncToCloudAction(auth.user, newTxs, savingsGoals);
+    } else if (confirmState.type === 'goal') {
+      const newGoals = savingsGoals.filter(g => g.id !== confirmState.id);
+      setSavingsGoals(newGoals);
+      syncToCloudAction(auth.user, transactions, newGoals);
+    }
+    setConfirmState({ ...confirmState, isOpen: false });
   };
 
+  if (!isLoaded) return <div className="h-screen flex items-center justify-center font-black text-indigo-600">Đang đồng bộ...</div>;
+
   return (
-    <Layout activeTab={activeTab} setActiveTab={setActiveTab} onLogout={() => { localStorage.removeItem(STORAGE_KEYS.SESSION); setAuth({ user: null, isAuthenticated: false }); }}>
-      {!auth.isAuthenticated ? (
-        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6">
-          <div className="w-full max-w-md bg-white rounded-[3rem] p-10 shadow-2xl border border-slate-100 text-center animate-in fade-in zoom-in duration-500">
-            <div className="w-20 h-20 bg-indigo-600 rounded-[2rem] flex items-center justify-center text-white text-4xl font-black shadow-2xl shadow-indigo-100 mx-auto mb-8 rotate-3">F</div>
-            <h1 className="text-3xl font-black text-slate-800 mb-2">FamilyFinance</h1>
-            <p className="text-slate-400 text-sm mb-8 font-bold uppercase tracking-widest">Tài chính chung - Hạnh phúc vững</p>
-            
-            <form onSubmit={handleAuth} className="space-y-4">
-              {!isLoginView && <input type="text" placeholder="Tên gia đình bạn" value={name} onChange={(e) => setName(e.target.value)} className="w-full px-6 py-4 bg-slate-50 rounded-2xl border-none outline-none focus:ring-2 focus:ring-indigo-500 font-bold" required />}
-              <input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-6 py-4 bg-slate-50 rounded-2xl border-none outline-none focus:ring-2 focus:ring-indigo-500 font-bold" required />
-              <input type="password" placeholder="Mật khẩu" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-6 py-4 bg-slate-50 rounded-2xl border-none outline-none focus:ring-2 focus:ring-indigo-500 font-bold" required />
-              <button className="w-full py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black shadow-xl hover:bg-indigo-700 transition-all uppercase tracking-widest active:scale-95">Đăng nhập</button>
-            </form>
+    <div style={bgStyle} className={auth.user?.useImageAsBackground ? 'app-custom-bg' : ''}>
+      {/* 2. Style CSS đặc biệt để tạo hiệu ứng nền mờ */}
+      <style>{`
+        .app-custom-bg .aurora-container {
+          background-image: linear-gradient(var(--bg-overlay), var(--bg-overlay)), var(--custom-bg) !important;
+          background-size: cover !important;
+          background-position: center !important;
+          background-attachment: fixed !important;
+          background-color: transparent !important;
+        }
+        .app-custom-bg .glass-card, .app-custom-bg .bg-white {
+          background-color: rgba(255, 255, 255, 0.5) !important;
+          backdrop-filter: blur(12px) !important;
+          -webkit-backdrop-filter: blur(12px);
+          border: 1px solid rgba(255, 255, 255, 0.3) !important;
+        }
+        .app-custom-bg main, .app-custom-bg .min-h-screen { background-color: transparent !important; }
+        .app-custom-bg .blob { opacity: 0.1 !important; }
+      `}</style>
 
-            {isLoginView && (
-              <div className="mt-6 flex flex-col items-center gap-4">
-                <div className="flex items-center gap-4 w-full">
-                  <div className="h-px bg-slate-100 flex-1"></div>
-                  <span className="text-[10px] font-black text-slate-300 uppercase">Hoặc đăng nhập nhanh</span>
-                  <div className="h-px bg-slate-100 flex-1"></div>
-                </div>
-                
-                <button 
-                  onClick={handleBiometricLogin}
-                  className="w-full py-4 bg-slate-50 text-indigo-600 rounded-2xl font-black flex items-center justify-center gap-3 border border-indigo-50 hover:bg-indigo-50 transition-all active:scale-95"
-                >
-                  <span className="text-2xl">📸</span>
-                  SỬ DỤNG FACE ID / VÂN TAY
-                </button>
+      <Layout activeTab={activeTab} setActiveTab={setActiveTab} onLogout={handleLogout} user={auth.user}>
+        <div className="min-h-screen transition-all duration-700">
+          {!auth.isAuthenticated ? (
+            <div className="min-h-screen flex flex-col items-center justify-center p-6">
+               <div className="w-full max-w-md glass-card rounded-[3rem] p-10 text-center border border-white/40">
+                  <h1 className="text-4xl font-bold text-blue-600 underline mb-2">Family Finance</h1>
+                  <p className="text-slate-400 text-[10px] mb-8 font-black uppercase tracking-[0.2em]">Tài chính chung - Hạnh phúc vững</p>
+                  <form onSubmit={handleAuth} className="space-y-5 text-left">
+                    <input type="email" placeholder="Email gia đình" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full px-7 py-4 input-glass rounded-2xl outline-none font-bold" required />
+                    <input type="password" placeholder="Mật khẩu" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full px-7 py-4 input-glass rounded-2xl outline-none font-bold" required />
+                    <button type="submit" className="w-full py-5 bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-2xl font-black uppercase tracking-widest btn-press">
+                      {isLoginView ? 'Đăng Nhập' : 'Tạo Nhà Mới'}
+                    </button>
+                  </form>
+                  {regSuccess && <p className="mt-4 text-emerald-600 font-bold text-xs uppercase">Đăng ký thành công!</p>}
+                  <button onClick={() => setIsLoginView(!isLoginView)} className="mt-6 text-xs font-black text-indigo-600 uppercase italic underline">
+                    {isLoginView ? 'Chưa có tài khoản? Đăng ký ngay' : 'Đã có nhà? Quay lại đăng nhập'}
+                  </button>
+               </div>
+            </div>
+          ) : (
+            <div className="pb-24">
+              <div className="fixed top-4 right-4 z-[60]">
+                 <div className={`flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-black uppercase shadow-xl border bg-white/90 backdrop-blur-sm ${syncStatus === 'synced' ? 'text-emerald-600 border-emerald-100' : 'text-amber-600 border-amber-100'}`}>
+                    <span className={`w-2 h-2 rounded-full ${syncStatus === 'synced' ? 'bg-emerald-500' : 'bg-amber-500 animate-ping'}`}></span>
+                    {syncStatus === 'synced' ? 'Trực tuyến' : 'Đang đồng bộ...'}
+                 </div>
               </div>
-            )}
 
-            <button onClick={() => setIsLoginView(!isLoginView)} className="mt-8 text-xs font-black text-indigo-600 uppercase tracking-widest">{isLoginView ? 'Đăng ký tài khoản mới' : 'Quay lại đăng nhập'}</button>
-          </div>
+              <div key={activeTab} className="view-transition">
+                {activeTab === 'dashboard' && auth.user && <Dashboard transactions={transactions} user={auth.user} />}
+                {activeTab === 'transactions' && <TransactionList transactions={transactions} onDeleteRequest={(id) => setConfirmState({ isOpen: true, id, type: 'transaction', title: 'Xóa giao dịch?', message: 'Lịch sử này sẽ bị xóa vĩnh viễn.' })} onEdit={(t) => { setEditingTransaction(t); setIsTxModalOpen(true); }} />}
+                {activeTab === 'goals' && <SavingsGoals goals={savingsGoals} onDeleteRequest={(id) => setConfirmState({ isOpen: true, id, type: 'goal', title: 'Hủy mục tiêu?', message: 'Mục tiêu này sẽ bị gỡ bỏ.' })} onEdit={(g) => { setEditingGoal(g); setIsGoalModalOpen(true); }} onUpdateAmount={(id, val) => { const newGoals = savingsGoals.map(g => g.id === id ? {...g, currentAmount: val} : g); setSavingsGoals(newGoals); syncToCloudAction(auth.user!, transactions, newGoals); }} onAdd={() => { setEditingGoal(undefined); setIsGoalModalOpen(true); }} />}
+                {activeTab === 'profile' && auth.user && <Profile user={auth.user} onUpdate={updateUser} onLogout={handleLogout} />}
+                {activeTab === 'settings' && auth.user && <Settings user={auth.user} onUpdate={updateUser} onRenameMember={(oldN, newN) => { if(!auth.user) return; const updatedM = auth.user.familyMembers.map(m => m === oldN ? newN : m); updateUser({ familyMembers: updatedM }); }} onDeleteRequest={(name) => setConfirmState({ isOpen: true, id: name, type: 'member', title: 'Gỡ thành viên?', message: `Xóa "${name}" khỏi gia đình?` })} onLogout={handleLogout} />}
+              </div>
+
+              {(activeTab === 'dashboard' || activeTab === 'transactions') && (
+                <button onClick={() => { setEditingTransaction(undefined); setIsTxModalOpen(true); }} className="fixed bottom-24 right-6 w-16 h-16 bg-indigo-600 text-white rounded-[1.5rem] shadow-2xl flex items-center justify-center text-4xl hover:scale-110 active:scale-95 transition-all z-40">
+                  +
+                </button>
+              )}
+
+              <TransactionModal isOpen={isTxModalOpen} onClose={() => setIsTxModalOpen(false)} onSave={saveTransaction} initialData={editingTransaction} familyMembers={auth.user?.familyMembers || []} existingTags={allExistingTags} />
+              <GoalModal isOpen={isGoalModalOpen} onClose={() => setIsGoalModalOpen(false)} onSave={saveGoal} initialData={editingGoal} />
+              <ConfirmDialog isOpen={confirmState.isOpen} onClose={() => setConfirmState({ ...confirmState, isOpen: false })} onConfirm={confirmDelete} title={confirmState.title} message={confirmState.message} />
+            </div>
+          )}
         </div>
-      ) : (
-        <>
-          {activeTab === 'dashboard' && auth.user && <Dashboard transactions={transactions} user={auth.user} />}
-          {activeTab === 'transactions' && <TransactionList transactions={transactions} onDeleteRequest={(id) => setConfirmState({ isOpen: true, id, type: 'transaction' })} onEdit={(t) => { setEditingTransaction(t); setIsTxModalOpen(true); }} />}
-          {activeTab === 'goals' && (
-            <SavingsGoals 
-              goals={savingsGoals} 
-              onDeleteRequest={(id) => setConfirmState({ isOpen: true, id, type: 'goal' })} 
-              onEdit={(g) => { setEditingGoal(g); setIsGoalModalOpen(true); }} 
-              onUpdateAmount={updateGoalAmount}
-              onAdd={() => { setEditingGoal(undefined); setIsGoalModalOpen(true); }}
-            />
-          )}
-          {activeTab === 'settings' && auth.user && <Settings user={auth.user} onUpdate={updateUser} onLogout={() => { localStorage.removeItem(STORAGE_KEYS.SESSION); setAuth({ user: null, isAuthenticated: false }); }} />}
-
-          {/* Global FAB: Chỉ hiển thị cho Giao dịch khi không ở tab Mục tiêu (vì tab đó đã có FAB riêng) */}
-          {activeTab !== 'goals' && (
-            <button 
-              onClick={() => { setEditingTransaction(undefined); setIsTxModalOpen(true); }} 
-              className="fixed bottom-24 right-6 md:bottom-10 md:right-10 w-16 h-16 bg-indigo-600 text-white rounded-[1.5rem] shadow-2xl flex items-center justify-center text-4xl font-light hover:scale-110 active:scale-95 transition-all z-[60]"
-              title="Thêm giao dịch mới"
-            >
-              +
-            </button>
-          )}
-
-          <TransactionModal isOpen={isTxModalOpen} onClose={() => setIsTxModalOpen(false)} onSave={saveTransaction} initialData={editingTransaction} />
-          <GoalModal isOpen={isGoalModalOpen} onClose={() => setIsGoalModalOpen(false)} onSave={saveGoal} initialData={editingGoal} />
-          <ConfirmDialog isOpen={confirmState.isOpen} onClose={() => setConfirmState({ ...confirmState, isOpen: false })} onConfirm={confirmDelete} title="Xác nhận xóa?" message="Bạn có chắc chắn muốn xóa mục này? Hành động này không thể hoàn tác." />
-        </>
-      )}
-    </Layout>
+      </Layout>
+    </div>
   );
 };
 
