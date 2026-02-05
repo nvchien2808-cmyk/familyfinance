@@ -1,5 +1,5 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { SavingsGoal } from '../types';
 
 interface Props {
@@ -11,8 +11,21 @@ interface Props {
 }
 
 const SavingsGoals: React.FC<Props> = ({ goals, onDeleteRequest, onEdit, onUpdateAmount, onAdd }) => {
+  const [activeTopUp, setActiveTopUp] = useState<string | null>(null);
+  const [topUpAmount, setTopUpAmount] = useState<string>('');
+
   const formatCurrency = (val: number) => {
     return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(val);
+  };
+
+  const formatWithDots = (val: string) => {
+    if (!val) return "";
+    const num = val.replace(/\D/g, "");
+    return num.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  };
+
+  const parseRawNumber = (val: string) => {
+    return val.replace(/\./g, "");
   };
 
   const calculateMonthly = (goal: SavingsGoal) => {
@@ -32,6 +45,17 @@ const SavingsGoals: React.FC<Props> = ({ goals, onDeleteRequest, onEdit, onUpdat
     }
   };
 
+  const handleUpdate = (goal: SavingsGoal) => {
+    const newTotal = parseFloat(parseRawNumber(topUpAmount));
+    if (isNaN(newTotal) || newTotal < 0) {
+      alert("Vui lòng nhập số tiền hợp lệ");
+      return;
+    }
+    onUpdateAmount(goal.id, newTotal);
+    setActiveTopUp(null);
+    setTopUpAmount('');
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center px-1">
@@ -44,9 +68,10 @@ const SavingsGoals: React.FC<Props> = ({ goals, onDeleteRequest, onEdit, onUpdat
             const progress = Math.min((goal.currentAmount / goal.targetAmount) * 100, 100);
             const monthly = calculateMonthly(goal);
             const priority = getPriorityLabel(goal.priority || 'medium');
+            const isToppingUp = activeTopUp === goal.id;
             
             return (
-              <div key={goal.id} className="bg-white p-7 rounded-[2.5rem] border border-slate-50 shadow-sm space-y-5 group relative overflow-hidden transition-all hover:shadow-xl hover:-translate-y-1">
+              <div key={goal.id} className="bg-white/80 backdrop-blur-md p-7 rounded-[2.5rem] border border-white/40 shadow-sm space-y-5 group relative overflow-hidden transition-all hover:shadow-xl hover:-translate-y-1">
                 <div className={`absolute top-0 left-0 w-2 h-full ${goal.color}`}></div>
                 
                 <div className="flex justify-between items-start">
@@ -69,7 +94,7 @@ const SavingsGoals: React.FC<Props> = ({ goals, onDeleteRequest, onEdit, onUpdat
                 <div className="space-y-3">
                   <div className="flex justify-between items-end">
                     <div className="space-y-0.5">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase">Tiến độ</p>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase">Tiến độ hiện tại</p>
                       <p className="text-sm font-black text-slate-800">{formatCurrency(goal.currentAmount)} / {formatCurrency(goal.targetAmount)}</p>
                     </div>
                     <span className="text-xl font-black text-indigo-600">{Math.round(progress)}%</span>
@@ -96,25 +121,55 @@ const SavingsGoals: React.FC<Props> = ({ goals, onDeleteRequest, onEdit, onUpdat
                   </div>
                 </div>
 
-                <div className="pt-2 flex gap-3">
-                  <button 
-                    onClick={() => onUpdateAmount(goal.id, goal.currentAmount + 500000)}
-                    className="flex-1 py-3 bg-white text-indigo-600 border border-indigo-100 rounded-2xl text-[10px] font-black uppercase hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-95"
-                  >
-                    +500K
-                  </button>
-                  <button 
-                    onClick={() => onUpdateAmount(goal.id, goal.currentAmount + 2000000)}
-                    className="flex-1 py-3 bg-white text-indigo-600 border border-indigo-100 rounded-2xl text-[10px] font-black uppercase hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-95"
-                  >
-                    +2 TRIỆU
-                  </button>
+                <div className="pt-2">
+                  {!isToppingUp ? (
+                    <button 
+                      onClick={() => {
+                        setActiveTopUp(goal.id);
+                        setTopUpAmount(goal.currentAmount.toString());
+                      }}
+                      className="w-full py-4 bg-indigo-50 text-indigo-600 rounded-2xl text-[10px] font-black uppercase hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-95 flex items-center justify-center gap-2"
+                    >
+                      <span>💰</span> Cập nhật số dư quỹ thực tế
+                    </button>
+                  ) : (
+                    <div className="space-y-3 animate-in slide-in-from-top duration-300">
+                      <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Nhập tổng số tiền hiện có</label>
+                      <div className="relative">
+                        <input 
+                          autoFocus
+                          type="text" 
+                          inputMode="numeric"
+                          placeholder="0" 
+                          value={formatWithDots(topUpAmount)}
+                          onChange={(e) => setTopUpAmount(parseRawNumber(e.target.value))}
+                          onKeyDown={(e) => e.key === 'Enter' && handleUpdate(goal)}
+                          className="w-full px-5 py-4 bg-slate-50 rounded-2xl border-2 border-indigo-100 outline-none font-black text-slate-800 text-sm focus:border-indigo-500 transition-all"
+                        />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">VND</span>
+                      </div>
+                      <div className="flex gap-2">
+                        <button 
+                          onClick={() => { setActiveTopUp(null); setTopUpAmount(''); }}
+                          className="flex-1 py-3 bg-slate-100 text-slate-400 rounded-xl text-[9px] font-black uppercase"
+                        >
+                          Hủy
+                        </button>
+                        <button 
+                          onClick={() => handleUpdate(goal)}
+                          className="flex-[2] py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-black uppercase shadow-lg shadow-indigo-100"
+                        >
+                          Xác nhận số dư mới
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })
         ) : (
-          <div className="col-span-full py-24 text-center bg-white rounded-[3rem] border border-dashed border-slate-200">
+          <div className="col-span-full py-24 text-center bg-white/50 backdrop-blur-md rounded-[3rem] border border-dashed border-slate-200">
             <span className="text-6xl block mb-4 animate-pulse">🏔️</span>
             <p className="text-slate-400 font-black uppercase tracking-widest text-sm">Chưa có mục tiêu tài chính</p>
             <p className="text-slate-300 text-xs mt-2 italic">Hãy tạo kế hoạch ngay hôm nay!</p>
@@ -122,7 +177,6 @@ const SavingsGoals: React.FC<Props> = ({ goals, onDeleteRequest, onEdit, onUpdat
         )}
       </div>
 
-      {/* Floating Action Button for Savings Goals */}
       <button 
         onClick={onAdd} 
         className="fixed bottom-24 right-6 md:bottom-10 md:right-10 w-16 h-16 bg-indigo-600 text-white rounded-[1.5rem] shadow-2xl flex items-center justify-center text-4xl font-light hover:scale-110 active:scale-95 transition-all z-[60]"

@@ -1,15 +1,18 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { User } from '../types';
 
 interface Props {
   user: User;
   onUpdate: (user: Partial<User>) => void;
+  onRenameMember: (oldName: string, newName: string) => void;
+  onDeleteRequest: (name: string) => void;
   onLogout: () => void;
 }
 
-const Settings: React.FC<Props> = ({ user, onUpdate, onLogout }) => {
-  const [isActivatingBio, setIsActivatingBio] = useState(false);
+const Settings: React.FC<Props> = ({ user, onUpdate, onRenameMember, onDeleteRequest, onLogout }) => {
+  const [newMember, setNewMember] = useState('');
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const formatWithDots = (val: string) => {
     if (!val) return "";
@@ -21,154 +24,199 @@ const Settings: React.FC<Props> = ({ user, onUpdate, onLogout }) => {
     return val.replace(/\./g, "");
   };
 
-  const enableBiometric = async () => {
-    setIsActivatingBio(true);
-    try {
-      if (!window.PublicKeyCredential) {
-        alert("Thiết bị của bạn không hỗ trợ tính năng này.");
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 2 * 1024 * 1024) {
+        alert("Ảnh quá lớn (vui lòng chọn ảnh < 2MB)");
         return;
       }
-
-      const confirmSetup = confirm("Bạn có muốn bật Face ID để đăng nhập nhanh cho lần sau không?");
-      
-      if (confirmSetup) {
-        const mockCredentialId = "bio_" + Math.random().toString(36).substr(2, 9);
-        onUpdate({ biometricCredentialId: mockCredentialId });
-        alert("Đã kích hoạt Face ID thành công! Bạn có thể sử dụng nó từ lần đăng nhập sau.");
-      }
-    } catch (err) {
-      console.error("Bio Setup Error:", err);
-      alert("Không thể thiết lập Face ID lúc này.");
-    } finally {
-      setIsActivatingBio(false);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        onUpdate({ profileImage: reader.result as string });
+      };
+      reader.readAsDataURL(file);
     }
   };
 
-  const handleToggleReminder = async () => {
-    const newValue = !user.reminderEnabled;
-    
-    if (newValue) {
-      // Yêu cầu quyền thông báo
-      if ("Notification" in window) {
-        const permission = await Notification.requestPermission();
-        if (permission !== "granted") {
-          alert("Bạn cần cấp quyền thông báo để ứng dụng có thể nhắc nhở chi tiêu.");
-          return;
-        }
-      }
+  const familyId = btoa(user.email).replace(/[/+=]/g, '').substring(0, 12).toUpperCase();
+
+  const addMember = () => {
+    const trimmed = newMember.trim();
+    if (!trimmed) return;
+    if (user.familyMembers.includes(trimmed)) {
+      alert("Thành viên này đã tồn tại!");
+      return;
     }
+    onUpdate({ familyMembers: [...user.familyMembers, trimmed] });
+    setNewMember('');
+  };
+
+  const handleRename = (oldName: string) => {
+    const newName = prompt(`Nhập tên mới thay thế cho "${oldName}":`, oldName);
+    if (newName === null) return;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === oldName) return;
     
-    onUpdate({ reminderEnabled: newValue });
+    if (user.familyMembers.includes(trimmed)) {
+      alert("Tên này đã trùng với thành viên khác!");
+      return;
+    }
+
+    onRenameMember(oldName, trimmed);
+    alert(`Đã đổi tên và cập nhật lịch sử chi tiêu cho "${trimmed}"`);
+  };
+
+  const handleRemove = (name: string) => {
+    if (user.familyMembers.length <= 1) {
+      alert("Gia đình phải có nhất một thành viên!");
+      return;
+    }
+    onDeleteRequest(name);
   };
 
   return (
-    <div className="space-y-8 animate-in slide-in-from-right duration-500">
-      <h2 className="text-2xl font-black text-slate-800">Cài đặt cá nhân</h2>
+    <div className="space-y-8 animate-in slide-in-from-right duration-500 pb-16">
+      <div className="px-2">
+        <h2 className="text-3xl font-black text-slate-800 tracking-tight">Cài đặt gia đình</h2>
+        <div className="flex items-center gap-2 mt-2">
+          <span className="bg-emerald-100 text-emerald-600 px-2 py-0.5 rounded text-[8px] font-black uppercase tracking-widest border border-emerald-200">Đồng bộ đám mây</span>
+          <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Giao diện & Thành viên</span>
+        </div>
+      </div>
       
-      <div className="bg-white rounded-[2.5rem] p-8 border border-slate-50 shadow-sm space-y-6">
-        <div className="flex flex-col items-center mb-6">
-          <div className="w-24 h-24 bg-indigo-50 rounded-full flex items-center justify-center text-4xl mb-4 border-4 border-white shadow-lg shadow-indigo-50/50">
-            👤
+      <div className="bg-white/80 backdrop-blur-md rounded-[3rem] p-8 border border-white/40 shadow-sm space-y-10">
+        
+        {/* Profile and Appearance Section */}
+        <div className="space-y-6">
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Ảnh gia đình & Giao diện</label>
+          <div className="flex flex-col gap-4">
+            <div className="flex items-center gap-6 p-6 bg-slate-50/50 rounded-[2rem] border border-slate-100">
+              <div className="relative cursor-pointer group" onClick={() => fileInputRef.current?.click()}>
+                <div className="w-20 h-20 rounded-3xl bg-indigo-600 overflow-hidden shadow-lg border-2 border-white flex items-center justify-center transition-all group-hover:scale-105">
+                  {user.profileImage ? (
+                    <img src={user.profileImage} alt="Avatar" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="text-white text-3xl font-black">{user.name.charAt(0)}</span>
+                  )}
+                </div>
+                <div className="absolute -bottom-1 -right-1 bg-white p-1.5 rounded-xl shadow-md border border-slate-100 text-xs">📸</div>
+                <input type="file" ref={fileInputRef} onChange={handleImageUpload} accept="image/*" className="hidden" />
+              </div>
+              <div className="flex-1">
+                <p className="text-xs font-black text-slate-800 uppercase tracking-tight">Tải ảnh đại diện mới</p>
+                <p className="text-[10px] text-slate-400 font-bold mt-1">Ảnh này sẽ xuất hiện trên mọi thiết bị trong nhà.</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-black text-slate-800">Cài đặt hình nền</p>
+                <p className="text-[10px] text-slate-400 font-bold">Sử dụng ảnh đại diện làm nền mờ cho ứng dụng</p>
+              </div>
+              <button 
+                onClick={() => onUpdate({ useImageAsBackground: !user.useImageAsBackground })}
+                className={`w-12 h-6 rounded-full transition-all relative ${user.useImageAsBackground ? 'bg-indigo-600' : 'bg-slate-300'}`}
+              >
+                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${user.useImageAsBackground ? 'left-7' : 'left-1'}`}></div>
+              </button>
+            </div>
           </div>
-          <h3 className="font-black text-lg text-slate-800">{user.name}</h3>
-          <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{user.email}</p>
         </div>
 
-        <div className="space-y-5">
-          <div>
-            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Tên hiển thị gia đình</label>
+        {/* Family Identity Section */}
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Tên ngôi nhà chung</label>
             <input
               type="text"
               value={user.name}
               onChange={(e) => onUpdate({ name: e.target.value })}
-              className="w-full px-5 py-4 bg-slate-50 rounded-2xl border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+              className="w-full px-6 py-4 bg-slate-50/50 rounded-2xl font-black text-slate-700 outline-none border-2 border-transparent focus:border-indigo-100 transition-all shadow-inner"
             />
           </div>
 
-          <div>
-            <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-1">Ngân sách hàng tháng (VND)</label>
+          <div className="space-y-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Ngân sách chi tiêu tháng</label>
             <div className="relative">
               <input
                 type="text"
-                inputMode="numeric"
                 value={formatWithDots(user.monthlyBudget.toString())}
                 onChange={(e) => onUpdate({ monthlyBudget: parseInt(parseRawNumber(e.target.value)) || 0 })}
-                className="w-full px-5 py-4 bg-slate-50 rounded-2xl border-none font-black text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none pr-12"
+                className="w-full px-6 py-4 bg-slate-50/50 rounded-2xl font-black text-slate-700 outline-none border-2 border-transparent focus:border-indigo-100 text-xl shadow-inner"
               />
-              <span className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-300 font-black">₫</span>
+              <span className="absolute right-6 top-1/2 -translate-y-1/2 font-black text-slate-300">VND</span>
             </div>
-          </div>
-
-          {/* Biometrics Section */}
-          <div className="pt-4 space-y-3">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Bảo mật & Đăng nhập</h4>
-            
-            <button
-              onClick={enableBiometric}
-              disabled={isActivatingBio}
-              className={`w-full py-4 px-6 rounded-2xl font-black flex items-center justify-between transition-all active:scale-95 ${user.biometricCredentialId ? 'bg-emerald-50 text-emerald-600 border border-emerald-100' : 'bg-indigo-50 text-indigo-600 border border-indigo-100'}`}
-            >
-              <div className="flex items-center gap-3">
-                <span className="text-xl">{user.biometricCredentialId ? '✅' : '📸'}</span>
-                <span className="text-xs uppercase tracking-wider">{user.biometricCredentialId ? 'Đã bật Face ID' : 'Bật đăng nhập Face ID'}</span>
-              </div>
-              <div className={`w-10 h-6 rounded-full relative transition-all ${user.biometricCredentialId ? 'bg-emerald-500' : 'bg-slate-300'}`}>
-                <div className={`absolute top-1 w-4 h-4 bg-white rounded-full transition-all ${user.biometricCredentialId ? 'right-1' : 'left-1'}`}></div>
-              </div>
-            </button>
-          </div>
-
-          {/* Daily Reminder Section */}
-          <div className="pt-4 space-y-3">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Thông báo & Nhắc nhở</h4>
-            
-            <div className={`p-6 rounded-[2rem] border transition-all ${user.reminderEnabled ? 'bg-blue-50 border-blue-100' : 'bg-slate-50 border-slate-100'}`}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <span className="text-xl">🔔</span>
-                  <div>
-                    <span className="text-xs font-black uppercase tracking-wider block">Nhắc nhở hàng ngày</span>
-                    <span className="text-[9px] text-slate-400 font-bold uppercase">Đừng bỏ lỡ việc ghi chép</span>
-                  </div>
-                </div>
-                <button 
-                  onClick={handleToggleReminder}
-                  className={`w-12 h-7 rounded-full relative transition-all ${user.reminderEnabled ? 'bg-blue-500' : 'bg-slate-300'}`}
-                >
-                  <div className={`absolute top-1 w-5 h-5 bg-white rounded-full transition-all shadow-sm ${user.reminderEnabled ? 'right-1' : 'left-1'}`}></div>
-                </button>
-              </div>
-
-              {user.reminderEnabled && (
-                <div className="flex items-center justify-between pt-4 border-t border-blue-100 animate-in fade-in zoom-in duration-300">
-                  <span className="text-[10px] font-black text-blue-900 uppercase">Thời gian nhắc</span>
-                  <input 
-                    type="time" 
-                    value={user.reminderTime} 
-                    onChange={(e) => onUpdate({ reminderTime: e.target.value })}
-                    className="bg-white border-none rounded-xl px-4 py-2 font-black text-blue-600 text-sm shadow-inner outline-none focus:ring-2 focus:ring-blue-300"
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div className="pt-6 border-t border-slate-50">
-            <button
-              onClick={onLogout}
-              className="w-full py-5 rounded-[1.5rem] font-black text-rose-500 bg-rose-50 hover:bg-rose-100 transition-all active:scale-95 uppercase tracking-widest text-xs"
-            >
-              🚪 Đăng xuất khỏi hệ thống
-            </button>
           </div>
         </div>
-      </div>
 
-      <div className="bg-gradient-to-br from-indigo-50 to-white p-8 rounded-[2.5rem] border border-indigo-100 shadow-sm">
-        <h4 className="font-black text-indigo-900 mb-2">Về FamilyFinance</h4>
-        <p className="text-xs text-indigo-700/70 leading-relaxed font-medium">
-          Phiên bản 1.0.4 (Daily Reminders). Chúng tôi sẽ giúp gia đình bạn duy trì thói quen quản lý tài chính tốt bằng các thông báo nhắc nhở thông minh.
-        </p>
+        {/* Member Management Section */}
+        <div className="space-y-4">
+          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Quản lý thành viên</label>
+          
+          <div className="flex gap-2 mb-4">
+            <input
+              type="text"
+              placeholder="Thêm người thân..."
+              value={newMember}
+              onChange={(e) => setNewMember(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && addMember()}
+              className="flex-1 px-5 py-4 bg-slate-50/50 rounded-2xl font-bold text-slate-700 outline-none border-2 border-transparent focus:border-indigo-100 transition-all shadow-inner"
+            />
+            <button 
+              onClick={addMember}
+              className="px-6 py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase shadow-lg shadow-indigo-100 active:scale-95 transition-all"
+            >
+              THÊM
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3">
+            {user.familyMembers.map((m, idx) => (
+              <div key={m} className="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-100 group hover:shadow-md transition-all">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-slate-50 text-indigo-600 rounded-xl flex items-center justify-center font-black text-lg shadow-inner">
+                    {m.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="font-black text-slate-800 text-sm">{m}</p>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest">Thành viên #{idx + 1}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1">
+                  <button 
+                    onClick={() => handleRename(m)}
+                    className="p-2.5 bg-slate-50 text-indigo-500 rounded-xl shadow-sm border border-slate-100 hover:bg-indigo-50 transition-all"
+                    title="Đổi tên"
+                  >
+                    ✏️
+                  </button>
+                  <button 
+                    onClick={() => handleRemove(m)}
+                    className="p-2.5 bg-slate-50 text-rose-500 rounded-xl shadow-sm border border-slate-100 hover:bg-rose-50 transition-all"
+                    title="Xóa"
+                  >
+                    🗑️
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Logout Section */}
+        <div className="pt-6 border-t border-slate-100">
+          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1 mb-4">Tài khoản</p>
+          <div className="flex flex-col gap-3">
+            <button
+              onClick={onLogout}
+              className="w-full py-5 rounded-[1.5rem] font-black text-rose-500 bg-rose-50 border border-rose-100 hover:bg-rose-100 transition-all uppercase tracking-widest text-xs active:scale-95 flex items-center justify-center gap-2 shadow-sm"
+            >
+              🚪 Đăng xuất khỏi gia đình
+            </button>
+            <p className="text-center text-[10px] text-slate-300 font-bold italic">Mọi dữ liệu sẽ được giữ lại an toàn trên đám mây của bạn.</p>
+          </div>
+        </div>
       </div>
     </div>
   );

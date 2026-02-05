@@ -93,8 +93,8 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-white w-full max-w-lg rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col md:flex-row max-h-[90vh]">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/40 p-4 animate-backdrop">
+      <div className="bg-white w-full max-w-lg rounded-[2.5rem] overflow-hidden shadow-2xl flex flex-col md:flex-row max-h-[90vh] animate-modal">
         
         {/* Lộ trình Panel (Desktop only or scrollable) */}
         <div className="hidden md:flex md:w-1/3 bg-slate-50 p-8 flex-col justify-between border-r border-slate-100">
@@ -122,7 +122,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
         <div className="flex-1 p-8 overflow-y-auto no-scrollbar">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-black text-slate-800">{initialData ? 'Thiết lập mục tiêu' : 'Mục tiêu mới'}</h2>
-            <button onClick={onClose} className="text-slate-400 hover:text-slate-600">✕</button>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-600 btn-press">✕</button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -132,7 +132,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                 placeholder="Ví dụ: Mua nhà, Mua xe, Quỹ học tập..."
                 required
               />
@@ -146,7 +146,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
                   inputMode="numeric"
                   value={formatWithDots(targetAmount)}
                   onChange={(e) => setTargetAmount(parseRawNumber(e.target.value))}
-                  className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                   required
                 />
               </div>
@@ -157,7 +157,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
                   inputMode="numeric"
                   value={formatWithDots(currentAmount)}
                   onChange={(e) => setCurrentAmount(parseRawNumber(e.target.value))}
-                  className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
                 />
               </div>
             </div>
@@ -169,7 +169,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
                   type="date"
                   value={deadline}
                   onChange={(e) => setDeadline(e.target.value)}
-                  className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                  className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all"
                   required
                 />
               </div>
@@ -178,7 +178,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
                 <select
                   value={priority}
                   onChange={(e) => setPriority(e.target.value as Priority)}
-                  className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
+                  className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none text-sm transition-all"
                 >
                   <option value="high">🔥 Cao</option>
                   <option value="medium">⚡ Trung bình</option>
@@ -192,7 +192,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
-                className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none text-xs h-16 resize-none"
+                className="w-full px-5 py-3 rounded-2xl bg-slate-50 border-none font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none text-xs h-16 resize-none transition-all"
                 placeholder="Ví dụ: Mỗi tháng trích lương 5 triệu..."
               />
             </div>
@@ -205,7 +205,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
                     key={i}
                     type="button"
                     onClick={() => setIcon(i)}
-                    className={`w-10 h-10 flex items-center justify-center rounded-xl text-xl border-2 transition-all ${icon === i ? 'border-indigo-500 bg-indigo-50 scale-110 shadow-sm' : 'border-transparent bg-slate-50 opacity-60'}`}
+                    className={`w-10 h-10 flex items-center justify-center rounded-xl text-xl border-2 transition-all btn-press ${icon === i ? 'border-indigo-500 bg-indigo-50 scale-110 shadow-sm' : 'border-transparent bg-slate-50 opacity-60'}`}
                   >
                     {i}
                   </button>
@@ -217,7 +217,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
                     key={c}
                     type="button"
                     onClick={() => setColor(c)}
-                    className={`w-6 h-6 rounded-full border-2 transition-all ${c} ${color === c ? 'border-slate-800 scale-125' : 'border-transparent'}`}
+                    className={`w-6 h-6 rounded-full border-2 transition-all btn-press ${c} ${color === c ? 'border-slate-800 scale-125' : 'border-transparent'}`}
                   />
                 ))}
               </div>
@@ -230,7 +230,7 @@ const GoalModal: React.FC<Props> = ({ isOpen, onClose, onSave, initialData }) =>
 
             <button
               type="submit"
-              className="w-full py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all active:scale-95 uppercase tracking-widest"
+              className="w-full py-5 bg-indigo-600 text-white rounded-[1.5rem] font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700 transition-all btn-press uppercase tracking-widest"
             >
               Lưu thiết lập
             </button>
