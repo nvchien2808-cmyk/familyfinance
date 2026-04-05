@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { Transaction, User } from '../types';
 import { DEFAULT_CATEGORIES } from '../constants';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, CartesianGrid } from 'recharts';
@@ -7,6 +7,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 interface Props {
   transactions: Transaction[];
   user: User;
+  startDate?: string; // Nhận từ App.tsx
+  endDate?: string;   // Nhận từ App.tsx
 }
 
 const TAILWIND_TO_HEX: Record<string, string> = {
@@ -16,41 +18,37 @@ const TAILWIND_TO_HEX: Record<string, string> = {
   'bg-teal-500': '#14b8a6', 'bg-cyan-500': '#06b6d4', 'bg-gray-500': '#6b7280',
 };
 
-const Dashboard: React.FC<Props> = ({ transactions = [], user }) => {
-  const now = new Date();
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1);
-  const [selectedYear, setSelectedYear] = useState(now.getFullYear());
-  const [chartView, setChartView] = useState<'summary' | 'expense' | 'income'>('summary');
+const Dashboard: React.FC<Props> = ({ transactions = [], user, startDate, endDate }) => {
+  const [chartView, setChartView] = React.useState<'summary' | 'expense' | 'income'>('summary');
 
-  const months = Array.from({ length: 12 }, (_, i) => i + 1);
-  const years = Array.from({ length: 5 }, (_, i) => now.getFullYear() - i);
-  const monthKey = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
-  
-  const monthTransactions = useMemo(() => 
-    transactions.filter(t => t.date && String(t.date).startsWith(monthKey)),
-    [transactions, monthKey]
+  // Tính toán số liệu dựa trên danh sách transactions đã được lọc từ App.tsx
+  const totalIncome = useMemo(() => 
+    transactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0), 
+    [transactions]
   );
-  
-  const monthIncome = useMemo(() => monthTransactions.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0), [monthTransactions]);
-  const monthExpense = useMemo(() => monthTransactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0), [monthTransactions]);
+
+  const totalExpense = useMemo(() => 
+    transactions.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0), 
+    [transactions]
+  );
 
   const expenseData = useMemo(() => 
     DEFAULT_CATEGORIES.filter(c => c.type === 'expense').map(cat => ({
         name: cat.name,
-        value: monthTransactions.filter(t => t.categoryId === cat.id).reduce((sum, t) => sum + t.amount, 0),
+        value: transactions.filter(t => t.categoryId === cat.id).reduce((sum, t) => sum + t.amount, 0),
         color: TAILWIND_TO_HEX[cat.color] || '#6366f1'
-    })).filter(d => d.value > 0), [monthTransactions]);
+    })).filter(d => d.value > 0), [transactions]);
 
   const incomeData = useMemo(() => 
     DEFAULT_CATEGORIES.filter(c => c.type === 'income').map(cat => ({
         name: cat.name,
-        value: monthTransactions.filter(t => t.categoryId === cat.id).reduce((sum, t) => sum + t.amount, 0),
+        value: transactions.filter(t => t.categoryId === cat.id).reduce((sum, t) => sum + t.amount, 0),
         color: TAILWIND_TO_HEX[cat.color] || '#10b981'
-    })).filter(d => d.value > 0), [monthTransactions]);
+    })).filter(d => d.value > 0), [transactions]);
 
   const summaryData = [
-    { name: 'Thu nhập', amount: monthIncome, fill: '#10b981' },
-    { name: 'Chi tiêu', amount: monthExpense, fill: '#ef4444' }
+    { name: 'Thu nhập', amount: totalIncome, fill: '#10b981' },
+    { name: 'Chi tiêu', amount: totalExpense, fill: '#ef4444' }
   ];
 
   const formatVND = (v: number) => v.toLocaleString('vi-VN', { style: 'currency', currency: 'VND' });
@@ -58,38 +56,37 @@ const Dashboard: React.FC<Props> = ({ transactions = [], user }) => {
   return (
     <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="space-y-6 pb-6">
       
-      {/* 1. Header & Date Selector */}
+      {/* 1. Header hiển thị khoảng ngày đang lọc */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center p-6 rounded-[2.5rem] bg-white shadow-sm border border-slate-100 gap-4">
         <div className="flex items-center gap-4">
           <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-xl shadow-lg">🏠</div>
           <div>
             <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest">Gia đình {user?.name}</p>
-            <h1 className="text-lg font-black text-slate-800 tracking-tight">Tổng Quan</h1>
+            <h1 className="text-lg font-black text-slate-800 tracking-tight">
+                {startDate && endDate ? `Từ ${startDate} đến ${endDate}` : "Tổng Quan Tất Cả"}
+            </h1>
           </div>
         </div>
-        <div className="flex gap-2 w-full md:w-auto">
-          <select value={selectedMonth} onChange={(e) => setSelectedMonth(Number(e.target.value))} className="flex-1 md:flex-none bg-slate-50 border-none rounded-xl px-4 py-2 text-xs font-bold text-indigo-600 outline-none">
-            {months.map(m => <option key={m} value={m}>Tháng {m}</option>)}
-          </select>
-          <select value={selectedYear} onChange={(e) => setSelectedYear(Number(e.target.value))} className="flex-1 md:flex-none bg-slate-50 border-none rounded-xl px-4 py-2 text-xs font-bold text-indigo-600 outline-none">
-            {years.map(y => <option key={y} value={y}>{y}</option>)}
-          </select>
+        <div className="bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
+            <span className="text-[10px] font-black text-indigo-600 uppercase">
+                ⚡ {transactions.length} giao dịch
+            </span>
         </div>
       </div>
 
       {/* 2. Wallet Card */}
       <motion.div whileHover={{ scale: 1.01 }} className="bg-gradient-to-br from-indigo-600 to-purple-700 rounded-[2.5rem] p-8 text-white shadow-2xl relative overflow-hidden">
         <div className="relative z-10">
-          <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Số dư khả dụng</p>
-          <h1 className="text-4xl font-black mb-8 tracking-tighter">{formatVND(monthIncome - monthExpense)}</h1>
+          <p className="text-white/60 text-[10px] font-black uppercase tracking-widest mb-1">Số dư trong khoảng này</p>
+          <h1 className="text-4xl font-black mb-8 tracking-tighter">{formatVND(totalIncome - totalExpense)}</h1>
           <div className="grid grid-cols-2 gap-4">
               <div className="bg-white/10 rounded-2xl p-4 border border-white/5 backdrop-blur-sm">
                 <p className="text-[8px] font-black opacity-70 uppercase tracking-tighter">Tổng Thu</p>
-                <p className="text-lg font-black text-emerald-300">+{formatVND(monthIncome)}</p>
+                <p className="text-lg font-black text-emerald-300">+{formatVND(totalIncome)}</p>
               </div>
               <div className="bg-white/10 rounded-2xl p-4 border border-white/5 backdrop-blur-sm">
                 <p className="text-[8px] font-black opacity-70 uppercase tracking-tighter">Tổng Chi</p>
-                <p className="text-lg font-black text-rose-300">-{formatVND(monthExpense)}</p>
+                <p className="text-lg font-black text-rose-300">-{formatVND(totalExpense)}</p>
               </div>
           </div>
         </div>
