@@ -1,4 +1,3 @@
-
 export type TransactionType = 'income' | 'expense';
 export type Priority = 'high' | 'medium' | 'low';
 
@@ -51,13 +50,18 @@ export interface User {
   name: string;
   password?: string;
   currency: string;
-  monthlyBudget: number;
+  monthlyBudget: number; // Đây là tổng ngân sách hàng tháng chung
+  
+  // ✅ THÊM MỚI: Ngân sách chi tiết cho từng hạng mục
+  // Key là categoryId, Value là số tiền mục tiêu (Ví dụ: { "cat_house": 5000000 })
+  categoryBudgets?: Record<string, number>; 
+
   familyMembers: string[];
   biometricCredentialId?: string;
   reminderEnabled: boolean;
   reminderTime: string;
-  profileImage?: string; // Ảnh đại diện người dùng
-  useImageAsBackground?: boolean; // Tùy chọn dùng ảnh làm hình nền
+  profileImage?: string;
+  useImageAsBackground?: boolean;
 }
 
 export interface AuthState {
