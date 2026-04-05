@@ -37,6 +37,12 @@ console.error = (...args) => {
   error(...args);
 };
 
+// Key để lưu trữ trong localStorage
+const FILTER_KEYS = {
+  START: 'ff_filter_start_date',
+  END: 'ff_filter_end_date'
+};
+
 const App: React.FC = () => {
   const [auth, setAuth] = useState<AuthState>({ user: null, isAuthenticated: false });
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -46,9 +52,13 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
   const [lastUpdated, setLastUpdated] = useState<number>(0);
   
-  // State cho khoảng ngày
-  const [startDate, setStartDate] = useState<string>(''); 
-  const [endDate, setEndDate] = useState<string>('');
+  // --- CẬP NHẬT: State cho khoảng ngày (Khởi tạo từ máy nếu có sẵn) ---
+  const [startDate, setStartDate] = useState<string>(() => {
+    return localStorage.getItem(FILTER_KEYS.START) || '';
+  }); 
+  const [endDate, setEndDate] = useState<string>(() => {
+    return localStorage.getItem(FILTER_KEYS.END) || '';
+  });
 
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
@@ -63,6 +73,12 @@ const App: React.FC = () => {
   const [regSuccess, setRegSuccess] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+
+  // --- CẬP NHẬT: useEffect để tự động lưu ngày mỗi khi thay đổi ---
+  useEffect(() => {
+    localStorage.setItem(FILTER_KEYS.START, startDate);
+    localStorage.setItem(FILTER_KEYS.END, endDate);
+  }, [startDate, endDate]);
 
   // 1. Tính toán style động cho Background
   const bgStyle = useMemo(() => {
@@ -263,7 +279,7 @@ const App: React.FC = () => {
                  </div>
               </div>
 
-              {/* Bộ chọn khoảng ngày mới */}
+              {/* Bộ chọn khoảng ngày có tính năng tự lưu */}
               {(activeTab === 'dashboard' || activeTab === 'transactions') && (
                 <div className="max-w-4xl mx-auto px-6 mb-6">
                   <div className="inline-flex items-center gap-3 bg-white/60 backdrop-blur-md p-2 px-4 rounded-2xl border border-white/40 shadow-sm">
@@ -288,7 +304,12 @@ const App: React.FC = () => {
                     </div>
                     {(startDate || endDate) && (
                       <button 
-                        onClick={() => { setStartDate(''); setEndDate(''); }}
+                        onClick={() => { 
+                          setStartDate(''); 
+                          setEndDate('');
+                          localStorage.removeItem(FILTER_KEYS.START);
+                          localStorage.removeItem(FILTER_KEYS.END);
+                        }}
                         className="ml-2 text-[10px] font-black uppercase text-red-400 hover:text-red-600"
                       >
                         ✕
