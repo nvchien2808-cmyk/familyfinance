@@ -13,7 +13,7 @@ import { FAMILY_MEMBERS } from './constants';
 import { login, register, listenAuth, logout } from "./services/authService";
 import { pushToCloud, onSyncBroadcast, CloudData, pullFromCloud } from './services/syncService';
 
-// --- HELPER: Nén ảnh để đảm bảo lưu trữ Firestore mượt mà ---
+// --- HELPER: Nén ảnh để lưu trữ Firestore mượt mà ---
 const compressImage = (base64Str: string): Promise<string> => {
   return new Promise((resolve) => {
     const img = new Image();
@@ -37,7 +37,6 @@ console.error = (...args) => {
   error(...args);
 };
 
-// Key để lưu trữ trong localStorage
 const FILTER_KEYS = {
   START: 'ff_filter_start_date',
   END: 'ff_filter_end_date'
@@ -52,13 +51,8 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
   const [lastUpdated, setLastUpdated] = useState<number>(0);
   
-  // --- CẬP NHẬT: State cho khoảng ngày (Khởi tạo từ máy nếu có sẵn) ---
-  const [startDate, setStartDate] = useState<string>(() => {
-    return localStorage.getItem(FILTER_KEYS.START) || '';
-  }); 
-  const [endDate, setEndDate] = useState<string>(() => {
-    return localStorage.getItem(FILTER_KEYS.END) || '';
-  });
+  const [startDate, setStartDate] = useState<string>(() => localStorage.getItem(FILTER_KEYS.START) || '');
+  const [endDate, setEndDate] = useState<string>(() => localStorage.getItem(FILTER_KEYS.END) || '');
 
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
@@ -74,13 +68,11 @@ const App: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // --- CẬP NHẬT: useEffect để tự động lưu ngày mỗi khi thay đổi ---
   useEffect(() => {
     localStorage.setItem(FILTER_KEYS.START, startDate);
     localStorage.setItem(FILTER_KEYS.END, endDate);
   }, [startDate, endDate]);
 
-  // 1. Tính toán style động cho Background
   const bgStyle = useMemo(() => {
     if (auth.isAuthenticated && auth.user?.useImageAsBackground && auth.user?.profileImage) {
       return { 
@@ -97,7 +89,6 @@ const App: React.FC = () => {
     return Array.from(tagSet).sort();
   }, [transactions]);
 
-  // Logic lọc giao dịch theo khoảng ngày
   const filteredTransactions = useMemo(() => {
     return transactions.filter((tx) => {
       if (!startDate || !endDate) return true;
@@ -151,10 +142,16 @@ const App: React.FC = () => {
             reminderEnabled: false,
             reminderTime: '20:00',
             useImageAsBackground: false,
-            profileImage: null
+            profileImage: null,
+            categoryBudgets: {}
           },
           isAuthenticated: true
         });
+        if (cloudData) {
+          setTransactions(cloudData.transactions || []);
+          setSavingsGoals(cloudData.goals || []);
+          setLastUpdated(cloudData.lastUpdated || 0);
+        }
       } else {
         syncUnsub?.();
         setAuth({ user: null, isAuthenticated: false });
@@ -164,6 +161,7 @@ const App: React.FC = () => {
     return () => { unsubAuth(); syncUnsub?.(); };
   }, [applySyncData]);
 
+  // Logic cập nhật User tích hợp nút Lưu của Settings
   const updateUser = async (data: Partial<User>) => {
     if (!auth.user) return;
     let updatedData = { ...data };
@@ -172,7 +170,7 @@ const App: React.FC = () => {
     }
     const updatedUser = { ...auth.user, ...updatedData };
     setAuth(prev => ({ ...prev, user: updatedUser }));
-    syncToCloudAction(updatedUser, transactions, savingsGoals);
+    await syncToCloudAction(updatedUser, transactions, savingsGoals);
   };
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -224,6 +222,9 @@ const App: React.FC = () => {
       const newGoals = savingsGoals.filter(g => g.id !== confirmState.id);
       setSavingsGoals(newGoals);
       syncToCloudAction(auth.user, transactions, newGoals);
+    } else if (confirmState.type === 'member') {
+      const updatedM = auth.user.familyMembers.filter(m => m !== confirmState.id);
+      updateUser({ familyMembers: updatedM });
     }
     setConfirmState({ ...confirmState, isOpen: false });
   };
@@ -235,16 +236,10 @@ const App: React.FC = () => {
       <style>{`
         .app-custom-bg .aurora-container {
           background-image: linear-gradient(var(--bg-overlay), var(--bg-overlay)), var(--custom-bg) !important;
-          background-size: cover !important;
-          background-position: center !important;
-          background-attachment: fixed !important;
-          background-color: transparent !important;
+          background-size: cover !important; background-position: center !important; background-attachment: fixed !important; background-color: transparent !important;
         }
         .app-custom-bg .glass-card, .app-custom-bg .bg-white {
-          background-color: rgba(255, 255, 255, 0.5) !important;
-          backdrop-filter: blur(12px) !important;
-          -webkit-backdrop-filter: blur(12px);
-          border: 1px solid rgba(255, 255, 255, 0.3) !important;
+          background-color: rgba(255, 255, 255, 0.5) !important; backdrop-filter: blur(12px) !important; -webkit-backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.3) !important;
         }
         .app-custom-bg main, .app-custom-bg .min-h-screen { background-color: transparent !important; }
         .app-custom-bg .blob { opacity: 0.1 !important; }
@@ -279,41 +274,21 @@ const App: React.FC = () => {
                  </div>
               </div>
 
-              {/* Bộ chọn khoảng ngày có tính năng tự lưu */}
+              {/* Bộ chọn ngày */}
               {(activeTab === 'dashboard' || activeTab === 'transactions') && (
                 <div className="max-w-4xl mx-auto px-6 mb-6">
                   <div className="inline-flex items-center gap-3 bg-white/60 backdrop-blur-md p-2 px-4 rounded-2xl border border-white/40 shadow-sm">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-black uppercase text-slate-400">Từ</span>
-                      <input 
-                        type="date" 
-                        value={startDate}
-                        onChange={(e) => setStartDate(e.target.value)}
-                        className="bg-transparent text-indigo-600 font-bold text-sm outline-none cursor-pointer"
-                      />
+                      <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-transparent text-indigo-600 font-bold text-sm outline-none cursor-pointer" />
                     </div>
                     <div className="w-[1px] h-4 bg-slate-300"></div>
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-black uppercase text-slate-400">Đến</span>
-                      <input 
-                        type="date" 
-                        value={endDate}
-                        onChange={(e) => setEndDate(e.target.value)}
-                        className="bg-transparent text-indigo-600 font-bold text-sm outline-none cursor-pointer"
-                      />
+                      <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-transparent text-indigo-600 font-bold text-sm outline-none cursor-pointer" />
                     </div>
                     {(startDate || endDate) && (
-                      <button 
-                        onClick={() => { 
-                          setStartDate(''); 
-                          setEndDate('');
-                          localStorage.removeItem(FILTER_KEYS.START);
-                          localStorage.removeItem(FILTER_KEYS.END);
-                        }}
-                        className="ml-2 text-[10px] font-black uppercase text-red-400 hover:text-red-600"
-                      >
-                        ✕
-                      </button>
+                      <button onClick={() => { setStartDate(''); setEndDate(''); }} className="ml-2 text-[10px] font-black uppercase text-red-400 hover:text-red-600">✕</button>
                     )}
                   </div>
                 </div>
