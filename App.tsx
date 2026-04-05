@@ -46,6 +46,10 @@ const App: React.FC = () => {
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
   const [lastUpdated, setLastUpdated] = useState<number>(0);
   
+  // State cho khoảng ngày
+  const [startDate, setStartDate] = useState<string>(''); 
+  const [endDate, setEndDate] = useState<string>('');
+
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [isGoalModalOpen, setIsGoalModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | undefined>();
@@ -76,6 +80,14 @@ const App: React.FC = () => {
     transactions.forEach(tx => tx.tags?.forEach(tag => tagSet.add(tag)));
     return Array.from(tagSet).sort();
   }, [transactions]);
+
+  // Logic lọc giao dịch theo khoảng ngày
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((tx) => {
+      if (!startDate || !endDate) return true;
+      return tx.date >= startDate && tx.date <= endDate;
+    }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [transactions, startDate, endDate]);
 
   const dataRef = useRef({ transactions, savingsGoals, auth, lastUpdated });
   useEffect(() => {
@@ -204,7 +216,6 @@ const App: React.FC = () => {
 
   return (
     <div style={bgStyle} className={auth.user?.useImageAsBackground ? 'app-custom-bg' : ''}>
-      {/* 2. Style CSS đặc biệt để tạo hiệu ứng nền mờ */}
       <style>{`
         .app-custom-bg .aurora-container {
           background-image: linear-gradient(var(--bg-overlay), var(--bg-overlay)), var(--custom-bg) !important;
@@ -252,9 +263,44 @@ const App: React.FC = () => {
                  </div>
               </div>
 
+              {/* Bộ chọn khoảng ngày mới */}
+              {(activeTab === 'dashboard' || activeTab === 'transactions') && (
+                <div className="max-w-4xl mx-auto px-6 mb-6">
+                  <div className="inline-flex items-center gap-3 bg-white/60 backdrop-blur-md p-2 px-4 rounded-2xl border border-white/40 shadow-sm">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Từ</span>
+                      <input 
+                        type="date" 
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="bg-transparent text-indigo-600 font-bold text-sm outline-none cursor-pointer"
+                      />
+                    </div>
+                    <div className="w-[1px] h-4 bg-slate-300"></div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Đến</span>
+                      <input 
+                        type="date" 
+                        value={endDate}
+                        onChange={(e) => setEndDate(e.target.value)}
+                        className="bg-transparent text-indigo-600 font-bold text-sm outline-none cursor-pointer"
+                      />
+                    </div>
+                    {(startDate || endDate) && (
+                      <button 
+                        onClick={() => { setStartDate(''); setEndDate(''); }}
+                        className="ml-2 text-[10px] font-black uppercase text-red-400 hover:text-red-600"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
               <div key={activeTab} className="view-transition">
-                {activeTab === 'dashboard' && auth.user && <Dashboard transactions={transactions} user={auth.user} />}
-                {activeTab === 'transactions' && <TransactionList transactions={transactions} onDeleteRequest={(id) => setConfirmState({ isOpen: true, id, type: 'transaction', title: 'Xóa giao dịch?', message: 'Lịch sử này sẽ bị xóa vĩnh viễn.' })} onEdit={(t) => { setEditingTransaction(t); setIsTxModalOpen(true); }} />}
+                {activeTab === 'dashboard' && auth.user && <Dashboard transactions={filteredTransactions} user={auth.user} startDate={startDate} endDate={endDate} />}
+                {activeTab === 'transactions' && <TransactionList transactions={filteredTransactions} onDeleteRequest={(id) => setConfirmState({ isOpen: true, id, type: 'transaction', title: 'Xóa giao dịch?', message: 'Lịch sử này sẽ bị xóa vĩnh viễn.' })} onEdit={(t) => { setEditingTransaction(t); setIsTxModalOpen(true); }} />}
                 {activeTab === 'goals' && <SavingsGoals goals={savingsGoals} onDeleteRequest={(id) => setConfirmState({ isOpen: true, id, type: 'goal', title: 'Hủy mục tiêu?', message: 'Mục tiêu này sẽ bị gỡ bỏ.' })} onEdit={(g) => { setEditingGoal(g); setIsGoalModalOpen(true); }} onUpdateAmount={(id, val) => { const newGoals = savingsGoals.map(g => g.id === id ? {...g, currentAmount: val} : g); setSavingsGoals(newGoals); syncToCloudAction(auth.user!, transactions, newGoals); }} onAdd={() => { setEditingGoal(undefined); setIsGoalModalOpen(true); }} />}
                 {activeTab === 'profile' && auth.user && <Profile user={auth.user} onUpdate={updateUser} onLogout={handleLogout} />}
                 {activeTab === 'settings' && auth.user && <Settings user={auth.user} onUpdate={updateUser} onRenameMember={(oldN, newN) => { if(!auth.user) return; const updatedM = auth.user.familyMembers.map(m => m === oldN ? newN : m); updateUser({ familyMembers: updatedM }); }} onDeleteRequest={(name) => setConfirmState({ isOpen: true, id: name, type: 'member', title: 'Gỡ thành viên?', message: `Xóa "${name}" khỏi gia đình?` })} onLogout={handleLogout} />}
