@@ -63,22 +63,26 @@ const Dashboard: React.FC<Props> = ({ transactions = [], user, startDate, endDat
     })).filter(d => d.value > 0), [transactions]);
 
   // Logic tổng hợp hạng mục chi tiết bao gồm cả ID để so sánh Budget
+  // Logic tổng hợp hạng mục chi tiết: Lấy từ danh mục gốc để luôn có ID so sánh với Budget
   const categorySummary = useMemo(() => {
-    const summary: Record<string, { id: string; amount: number; color: string }> = {};
-    
-    transactions.filter(t => t.type === 'expense').forEach(tx => {
-      const category = DEFAULT_CATEGORIES.find(c => c.id === tx.categoryId);
-      const name = category?.name || "Khác";
-      const color = TAILWIND_TO_HEX[category?.color || "bg-gray-500"];
-      
-      if (!summary[name]) {
-        summary[name] = { id: tx.categoryId, amount: 0, color };
-      }
-      summary[name].amount += tx.amount;
-    });
+    return DEFAULT_CATEGORIES
+      .filter(cat => cat.type === 'expense') // Chỉ lấy các mục chi tiêu
+      .map(cat => {
+        const amount = transactions
+          .filter(t => t.categoryId === cat.id)
+          .reduce((sum, t) => sum + t.amount, 0);
 
-    return Object.entries(summary).sort((a, b) => b[1].amount - a[1].amount);
-  }, [transactions]);
+        return {
+          id: cat.id,
+          name: cat.name,
+          amount: amount,
+          color: TAILWIND_TO_HEX[cat.color] || '#6366f1'
+        };
+      })
+      // Chỉ hiện những mục ĐÃ CHI TIÊU hoặc ĐÃ CÀI HẠN MỨC
+      .filter(item => item.amount > 0 || (budgets[item.id] && budgets[item.id] > 0))
+      .sort((a, b) => b.amount - a.amount);
+  }, [transactions, budgets]); // Thêm budgets vào đây để khi save ở setting là dashboard cập nhật ngay
 
   const summaryData = [
     { name: 'Thu nhập', amount: totalIncome, fill: '#10b981' },
@@ -96,8 +100,9 @@ const Dashboard: React.FC<Props> = ({ transactions = [], user, startDate, endDat
           <div className="w-12 h-12 bg-indigo-600 rounded-2xl flex items-center justify-center text-xl shadow-lg">🏠</div>
           <div>
             <p className="text-slate-400 text-[8px] font-black uppercase tracking-widest">Gia đình {user?.name}</p>
+            {/* SỬA DÒNG NÀY: Thay vì check date để hiện ngày, ta cố định tiêu đề */}
             <h1 className="text-lg font-black text-slate-800 tracking-tight">
-                {startDate && endDate ? `Từ ${startDate} đến ${endDate}` : "Tổng Quan Tất Cả"}
+                Tổng quan chi tiêu
             </h1>
           </div>
         </div>
@@ -173,15 +178,16 @@ const Dashboard: React.FC<Props> = ({ transactions = [], user, startDate, endDat
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {categorySummary.map(([name, data]) => {
-            const target = budgets[data.id] || 0;
-            const remaining = target - data.amount;
-            const percent = target > 0 ? Math.min((data.amount / target) * 100, 100) : 0;
+          {categorySummary.map((item) => {
+            const name = item.name; // Lấy tên từ item
+            const target = budgets[item.id] || budgets[String(item.id)] || 0;
+            const remaining = target - item.amount;
+            const percent = target > 0 ? Math.min((item.amount / target) * 100, 100) : 0;
             const isOverBudget = target > 0 && remaining < 0;
 
             return (
               <motion.div 
-                key={name}
+                key={item.id} // Dùng item.id làm key
                 whileHover={{ y: -3 }}
                 className="bg-white p-5 rounded-[2.2rem] border border-slate-50 shadow-sm transition-all"
               >
@@ -192,7 +198,7 @@ const Dashboard: React.FC<Props> = ({ transactions = [], user, startDate, endDat
                     </div>
                     <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-tighter">{name}</p>
-                      <p className="text-sm font-black text-slate-800">{data.amount.toLocaleString()}đ</p>
+                      <p className="text-sm font-black text-slate-800">{item.amount.toLocaleString()}đ</p>
                     </div>
                   </div>
                   
@@ -214,7 +220,7 @@ const Dashboard: React.FC<Props> = ({ transactions = [], user, startDate, endDat
                         initial={{ width: 0 }}
                         animate={{ width: `${percent}%` }}
                         className={`h-full rounded-full transition-all duration-1000 ${isOverBudget ? 'bg-red-500' : ''}`}
-                        style={{ backgroundColor: !isOverBudget ? data.color : undefined }}
+                        style={{ backgroundColor: !isOverBudget ? item.color : undefined }}
                       />
                     </div>
                     <div className="flex justify-between text-[9px] font-black uppercase tracking-tighter">
