@@ -164,12 +164,25 @@ const App: React.FC = () => {
   // Logic cập nhật User tích hợp nút Lưu của Settings
   const updateUser = async (data: Partial<User>) => {
     if (!auth.user) return;
+    
     let updatedData = { ...data };
     if (data.profileImage && data.profileImage.startsWith('data:image')) {
       updatedData.profileImage = await compressImage(data.profileImage);
     }
+
+    // Tạo object user mới hoàn toàn để đảm bảo Dashboard nhận được prop mới
     const updatedUser = { ...auth.user, ...updatedData };
-    setAuth(prev => ({ ...prev, user: updatedUser }));
+    
+    // Cập nhật State auth ngay lập tức
+    setAuth(prev => ({ 
+      ...prev, 
+      user: updatedUser 
+    }));
+
+    // Cập nhật lastUpdated để các hook useMemo ở Dashboard nhận biết có sự thay đổi
+    setLastUpdated(Date.now()); 
+
+    // Đồng bộ lên cloud
     await syncToCloudAction(updatedUser, transactions, savingsGoals);
   };
 
