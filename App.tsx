@@ -163,28 +163,59 @@ const App: React.FC = () => {
 
   // Logic cập nhật User tích hợp nút Lưu của Settings
   const updateUser = async (data: Partial<User>) => {
-    if (!auth.user) return;
-    
+  if (!auth.user) return;
+  
+  // 1. Lưu lại trạng thái cũ để backup
+  const previousUser = { ...auth.user };
+  
+  try {
     let updatedData = { ...data };
+
+    // Xử lý nén ảnh (Chỉ xử lý nếu có dữ liệu ảnh mới)
     if (data.profileImage && data.profileImage.startsWith('data:image')) {
-      updatedData.profileImage = await compressImage(data.profileImage);
+      try {
+        updatedData.profileImage = await compressImage(data.profileImage);
+      } catch (imgErr) {
+        console.error("Lỗi nén ảnh:", imgErr);
+        // Nếu nén ảnh lỗi, vẫn cho phép tiếp tục cập nhật các thông tin khác
+      }
     }
 
-    // Tạo object user mới hoàn toàn để đảm bảo Dashboard nhận được prop mới
     const updatedUser = { ...auth.user, ...updatedData };
     
-    // Cập nhật State auth ngay lập tức
-    setAuth(prev => ({ 
-      ...prev, 
-      user: updatedUser 
-    }));
+    // 2. Cập nhật State Local ngay lập tức (Optimistic Update)
+    setAuth(prev => ({ ...prev, user: updatedUser }));
+    setLastUpdated(Date.now());
 
-    // Cập nhật lastUpdated để các hook useMemo ở Dashboard nhận biết có sự thay đổi
-    setLastUpdated(Date.now()); 
+    // 3. Gọi đồng bộ và kiểm tra kết quả
+    setSyncStatus('syncing');
+    const timestamp = Date.now();
+    
+    // Lưu ý: Đảm bảo truyền đúng biến updatedUser vào đây
+    const success = await pushToCloud(updatedUser.id, {
+      transactions: transactions,
+      goals: savingsGoals,
+      user: updatedUser,
+      lastUpdated: timestamp
+    });
 
-    // Đồng bộ lên cloud
-    await syncToCloudAction(updatedUser, transactions, savingsGoals);
-  };
+    if (success) {
+      setSyncStatus('synced');
+      setLastUpdated(timestamp);
+      console.log("Đồng bộ thành công!");
+    } else {
+      throw new Error("Lỗi phản hồi từ server");
+    }
+
+  } catch (err) {
+    console.error("Lỗi quá trình cập nhật:", err);
+    setSyncStatus('error');
+    
+    // 4. ROLLBACK: Nếu lỗi đồng bộ, trả lại dữ liệu cũ để tránh sai lệch
+    setAuth(prev => ({ ...prev, user: previousUser }));
+    alert("Không thể lưu dữ liệu lên đám mây. Vui lòng kiểm tra kết nối mạng!");
+  }
+};
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
